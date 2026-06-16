@@ -1,0 +1,791 @@
+# Frontend Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: tracing
+  labels:
+    app: frontend
+    version: "1.0.0"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+    spec:
+      containers:
+      - name: frontend
+        image: golang:1.21-alpine
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          mkdir -p /app && cd /app &&
+          cat > main.go << 'EOF'
+          package main
+
+          import (
+              "context"
+              "fmt"
+              "io"
+              "log"
+              "net/http"
+              "time"
+
+              "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+              "go.opentelemetry.io/otel"
+              "go.opentelemetry.io/otel/exporters/otlp/otlptrace"
+              "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+              "go.opentelemetry.io/otel/sdk/resource"
+              sdktrace "go.opentelemetry.io/otel/sdk/trace"
+              semconv "go.opentelemetry.io/otel/semconv/v1.12.0"
+              "go.opentelemetry.io/otel/trace"
+          )
+
+          var tracer trace.Tracer
+
+          func init() {
+              ctx := context.Background()
+
+              exporter, err := otlptrace.New(ctx,
+                  otlptracegrpc.NewClient(
+                      otlptracegrpc.WithEndpoint("otel-collector:4317"),
+                      otlptracegrpc.WithInsecure(),
+                  ),
+              )
+              if err != nil {
+                  log.Printf("Failed to create exporter: %v", err)
+                  return
+              }
+
+              res, err := resource.New(ctx,
+                  resource.WithAttributes(
+                      semconv.ServiceNameKey.String("frontend"),
+                      semconv.ServiceVersionKey.String("1.0.0"),
+                  ),
+              )
+              if err != nil {
+                  log.Printf("Failed to create resource: %v", err)
+                  return
+              }
+
+              tp := sdktrace.NewTracerProvider(
+                  sdktrace.WithBatcher(exporter),
+                  sdktrace.WithResource(res),
+              )
+              otel.SetTracerProvider(tp)
+
+              tracer = tp.Tracer("frontend")
+          }
+
+          func main() {
+              http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+                  ctx, span := tracer.Start(r.Context(), "GET /")
+                  defer span.End()
+
+                  w.Header().Set("Content-Type", "text/html")
+                  fmt.Fprint(w, `
+                      <html>
+                      <head><title>KubeWatch Demo</title></head>
+                      <body>
+                          <h1>Welcome to KubeWatch Frontend</h1>
+                          <p>This service demonstrates distributed tracing.</p>
+                          <ul>
+                              <li><a href="/order">Place Order</a></li>
+                              <li><a href="/status">Check Status</a></li>
+                          </ul>
+                      </body>
+                      </html>
+                  `)
+              })
+
+              http.HandleFunc("/order", func(w http.ResponseWriter, r *http.Request) {
+                  ctx, span := tracer.Start(r.Context(), "GET /order")
+                  defer span.End()
+
+                  orderResp, err := callService(ctx, "http://orders:8081/create")
+                  if err != nil {
+                      http.Error(w, err.Error(), http.StatusInternalServerError)
+                      return
+                  }
+
+                  w.Header().Set("Content-Type", "text/plain")
+                  fmt.Fprintf(w, "Order created: %s\n", orderResp)
+              })
+
+              http.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
+                  ctx, span := tracer.Start(r.Context(), "GET /status")
+                  defer span.End()
+
+                  w.Header().Set("Content-Type", "text/plain")
+                  fmt.Fprint(w, "Frontend is running\n")
+              })
+
+              http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+                  w.Header().Set("Content-Type", "text/plain")
+                  fmt.Fprint(w, "OK\n")
+              })
+
+              log.Println("Frontend listening on :8080")
+              if err := http.ListenAndServe(":8080", otelhttp.NewHandler(http.DefaultServeMux, "frontend")); err != nil {
+                  log.Fatalf("Server error: %v", err)
+              }
+          }
+
+          func callService(ctx context.Context, url string) (string, error) {
+              ctx, span := tracer.Start(ctx, "callService")
+              defer span.End()
+
+              client := &http.Client{
+                  Timeout: 5 * time.Second,
+                  Transport: otelhttp.NewTransport(http.DefaultTransport),
+              }
+
+              req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+              if err != nil {
+                  return "", err
+              }
+
+              resp, err := client.Do(req)
+              if err != nil {
+                  return "", err
+              }
+              defer resp.Body.Close()
+
+              body, err := io.ReadAll(resp.Body)
+              return string(body), err
+          }
+          EOF
+          cat > go.mod << 'EOF'
+          module kubewatch/frontend
+          go 1.21
+          require (
+              go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.49.0
+              go.opentelemetry.io/otel v1.25.0
+              go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.25.0
+              go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.25.0
+              go.opentelemetry.io/otel/sdk v1.25.0
+              go.opentelemetry.io/otel/trace v1.25.0
+          )
+          EOF
+          go mod tidy &&
+          go run main.go
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: "http://otel-collector:4317"
+        - name: OTEL_EXPORTER_OTLP_PROTOCOL
+          value: "grpc"
+        - name: OTEL_TRACES_SAMPLER
+          value: "always_on"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: tracing
+  labels:
+    app: frontend
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8080
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  selector:
+    app: frontend
+---
+# Orders Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders
+  namespace: tracing
+  labels:
+    app: orders
+    version: "1.0.0"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: orders
+  template:
+    metadata:
+      labels:
+        app: orders
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8081"
+    spec:
+      containers:
+      - name: orders
+        image: golang:1.21-alpine
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          mkdir -p /app && cd /app &&
+          cat > main.go << 'EOF'
+          package main
+
+          import (
+              "context"
+              "fmt"
+              "io"
+              "log"
+              "net/http"
+              "time"
+
+              "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+              "go.opentelemetry.io/otel"
+              "go.opentelemetry.io/otel/exporters/otlp/otlptrace"
+              "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+              "go.opentelemetry.io/otel/sdk/resource"
+              sdktrace "go.opentelemetry.io/otel/sdk/trace"
+              semconv "go.opentelemetry.io/otel/semconv/v1.12.0"
+              "go.opentelemetry.io/otel/trace"
+          )
+
+          var tracer trace.Tracer
+
+          func init() {
+              ctx := context.Background()
+
+              exporter, err := otlptrace.New(ctx,
+                  otlptracegrpc.NewClient(
+                      otlptracegrpc.WithEndpoint("otel-collector:4317"),
+                      otlptracegrpc.WithInsecure(),
+                  ),
+              )
+              if err != nil {
+                  log.Printf("Failed to create exporter: %v", err)
+                  return
+              }
+
+              res, err := resource.New(ctx,
+                  resource.WithAttributes(
+                      semconv.ServiceNameKey.String("orders"),
+                      semconv.ServiceVersionKey.String("1.0.0"),
+                  ),
+              )
+              if err != nil {
+                  log.Printf("Failed to create resource: %v", err)
+                  return
+              }
+
+              tp := sdktrace.NewTracerProvider(
+                  sdktrace.WithBatcher(exporter),
+                  sdktrace.WithResource(res),
+              )
+              otel.SetTracerProvider(tp)
+
+              tracer = tp.Tracer("orders")
+          }
+
+          func main() {
+              http.HandleFunc("/create", func(w http.ResponseWriter, r *http.Request) {
+                  ctx, span := tracer.Start(r.Context(), "POST /create")
+                  defer span.End()
+
+                  invResp, err := callService(ctx, "http://inventory:8083/check")
+                  if err != nil {
+                      http.Error(w, fmt.Sprintf("Inventory check failed: %v", err), http.StatusInternalServerError)
+                      return
+                  }
+
+                  payResp, err := callService(ctx, "http://payments:8082/process")
+                  if err != nil {
+                      http.Error(w, fmt.Sprintf("Payment failed: %v", err), http.StatusInternalServerError)
+                      return
+                  }
+
+                  w.Header().Set("Content-Type", "text/plain")
+                  fmt.Fprintf(w, "Order ID: 12345\nInventory: %s\nPayment: %s\n", invResp, payResp)
+              })
+
+              http.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
+                  ctx, span := tracer.Start(r.Context(), "GET /status")
+                  defer span.End()
+
+                  w.Header().Set("Content-Type", "text/plain")
+                  fmt.Fprint(w, "Orders service running\n")
+              })
+
+              http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+                  w.Header().Set("Content-Type", "text/plain")
+                  fmt.Fprint(w, "OK\n")
+              })
+
+              log.Println("Orders service listening on :8081")
+              if err := http.ListenAndServe(":8081", otelhttp.NewHandler(http.DefaultServeMux, "orders")); err != nil {
+                  log.Fatalf("Server error: %v", err)
+              }
+          }
+
+          func callService(ctx context.Context, url string) (string, error) {
+              ctx, span := tracer.Start(ctx, "callService")
+              defer span.End()
+
+              client := &http.Client{
+                  Timeout: 5 * time.Second,
+                  Transport: otelhttp.NewTransport(http.DefaultTransport),
+              }
+
+              req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+              if err != nil {
+                  return "", err
+              }
+
+              resp, err := client.Do(req)
+              if err != nil {
+                  return "", err
+              }
+              defer resp.Body.Close()
+
+              body, err := io.ReadAll(resp.Body)
+              return string(body), err
+          }
+          EOF
+          cat > go.mod << 'EOF'
+          module kubewatch/orders
+          go 1.21
+          require (
+              go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.49.0
+              go.opentelemetry.io/otel v1.25.0
+              go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.25.0
+              go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.25.0
+              go.opentelemetry.io/otel/sdk v1.25.0
+              go.opentelemetry.io/otel/trace v1.25.0
+          )
+          EOF
+          go mod tidy &&
+          go run main.go
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8081
+          name: http
+        env:
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: "http://otel-collector:4317"
+        - name: OTEL_EXPORTER_OTLP_PROTOCOL
+          value: "grpc"
+        - name: OTEL_TRACES_SAMPLER
+          value: "always_on"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8081
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8081
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: orders
+  namespace: tracing
+  labels:
+    app: orders
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8081
+    targetPort: 8081
+    protocol: TCP
+    name: http
+  selector:
+    app: orders
+---
+# Payments Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payments
+  namespace: tracing
+  labels:
+    app: payments
+    version: "1.0.0"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: payments
+  template:
+    metadata:
+      labels:
+        app: payments
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8082"
+    spec:
+      containers:
+      - name: payments
+        image: golang:1.21-alpine
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          mkdir -p /app && cd /app &&
+          cat > main.go << 'EOF'
+          package main
+
+          import (
+              "context"
+              "fmt"
+              "log"
+              "net/http"
+              "time"
+
+              "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+              "go.opentelemetry.io/otel"
+              "go.opentelemetry.io/otel/exporters/otlp/otlptrace"
+              "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+              "go.opentelemetry.io/otel/sdk/resource"
+              sdktrace "go.opentelemetry.io/otel/sdk/trace"
+              semconv "go.opentelemetry.io/otel/semconv/v1.12.0"
+              "go.opentelemetry.io/otel/trace"
+          )
+
+          var tracer trace.Tracer
+
+          func init() {
+              ctx := context.Background()
+
+              exporter, err := otlptrace.New(ctx,
+                  otlptracegrpc.NewClient(
+                      otlptracegrpc.WithEndpoint("otel-collector:4317"),
+                      otlptracegrpc.WithInsecure(),
+                  ),
+              )
+              if err != nil {
+                  log.Printf("Failed to create exporter: %v", err)
+                  return
+              }
+
+              res, err := resource.New(ctx,
+                  resource.WithAttributes(
+                      semconv.ServiceNameKey.String("payments"),
+                      semconv.ServiceVersionKey.String("1.0.0"),
+                  ),
+              )
+              if err != nil {
+                  log.Printf("Failed to create resource: %v", err)
+                  return
+              }
+
+              tp := sdktrace.NewTracerProvider(
+                  sdktrace.WithBatcher(exporter),
+                  sdktrace.WithResource(res),
+              )
+              otel.SetTracerProvider(tp)
+
+              tracer = tp.Tracer("payments")
+          }
+
+          func main() {
+              http.HandleFunc("/process", func(w http.ResponseWriter, r *http.Request) {
+                  ctx, span := tracer.Start(r.Context(), "POST /process")
+                  defer span.End()
+
+                  time.Sleep(100 * time.Millisecond)
+
+                  w.Header().Set("Content-Type", "text/plain")
+                  fmt.Fprint(w, "Payment processed: $99.99\n")
+              })
+
+              http.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
+                  ctx, span := tracer.Start(r.Context(), "GET /status")
+                  defer span.End()
+
+                  w.Header().Set("Content-Type", "text/plain")
+                  fmt.Fprint(w, "Payments service running\n")
+              })
+
+              http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+                  w.Header().Set("Content-Type", "text/plain")
+                  fmt.Fprint(w, "OK\n")
+              })
+
+              log.Println("Payments service listening on :8082")
+              if err := http.ListenAndServe(":8082", otelhttp.NewHandler(http.DefaultServeMux, "payments")); err != nil {
+                  log.Fatalf("Server error: %v", err)
+              }
+          }
+          EOF
+          cat > go.mod << 'EOF'
+          module kubewatch/payments
+          go 1.21
+          require (
+              go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.49.0
+              go.opentelemetry.io/otel v1.25.0
+              go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.25.0
+              go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.25.0
+              go.opentelemetry.io/otel/sdk v1.25.0
+              go.opentelemetry.io/otel/trace v1.25.0
+          )
+          EOF
+          go mod tidy &&
+          go run main.go
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8082
+          name: http
+        env:
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: "http://otel-collector:4317"
+        - name: OTEL_EXPORTER_OTLP_PROTOCOL
+          value: "grpc"
+        - name: OTEL_TRACES_SAMPLER
+          value: "always_on"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8082
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8082
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: payments
+  namespace: tracing
+  labels:
+    app: payments
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8082
+    targetPort: 8082
+    protocol: TCP
+    name: http
+  selector:
+    app: payments
+---
+# Inventory Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inventory
+  namespace: tracing
+  labels:
+    app: inventory
+    version: "1.0.0"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: inventory
+  template:
+    metadata:
+      labels:
+        app: inventory
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8083"
+    spec:
+      containers:
+      - name: inventory
+        image: golang:1.21-alpine
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          mkdir -p /app && cd /app &&
+          cat > main.go << 'EOF'
+          package main
+
+          import (
+              "context"
+              "fmt"
+              "log"
+              "net/http"
+              "time"
+
+              "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+              "go.opentelemetry.io/otel"
+              "go.opentelemetry.io/otel/exporters/otlp/otlptrace"
+              "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+              "go.opentelemetry.io/otel/sdk/resource"
+              sdktrace "go.opentelemetry.io/otel/sdk/trace"
+              semconv "go.opentelemetry.io/otel/semconv/v1.12.0"
+              "go.opentelemetry.io/otel/trace"
+          )
+
+          var tracer trace.Tracer
+
+          func init() {
+              ctx := context.Background()
+
+              exporter, err := otlptrace.New(ctx,
+                  otlptracegrpc.NewClient(
+                      otlptracegrpc.WithEndpoint("otel-collector:4317"),
+                      otlptracegrpc.WithInsecure(),
+                  ),
+              )
+              if err != nil {
+                  log.Printf("Failed to create exporter: %v", err)
+                  return
+              }
+
+              res, err := resource.New(ctx,
+                  resource.WithAttributes(
+                      semconv.ServiceNameKey.String("inventory"),
+                      semconv.ServiceVersionKey.String("1.0.0"),
+                  ),
+              )
+              if err != nil {
+                  log.Printf("Failed to create resource: %v", err)
+                  return
+              }
+
+              tp := sdktrace.NewTracerProvider(
+                  sdktrace.WithBatcher(exporter),
+                  sdktrace.WithResource(res),
+              )
+              otel.SetTracerProvider(tp)
+
+              tracer = tp.Tracer("inventory")
+          }
+
+          func main() {
+              http.HandleFunc("/check", func(w http.ResponseWriter, r *http.Request) {
+                  ctx, span := tracer.Start(r.Context(), "GET /check")
+                  defer span.End()
+
+                  time.Sleep(50 * time.Millisecond)
+
+                  w.Header().Set("Content-Type", "text/plain")
+                  fmt.Fprint(w, "Stock available: 150 units\n")
+              })
+
+              http.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
+                  ctx, span := tracer.Start(r.Context(), "GET /status")
+                  defer span.End()
+
+                  w.Header().Set("Content-Type", "text/plain")
+                  fmt.Fprint(w, "Inventory service running\n")
+              })
+
+              http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+                  w.Header().Set("Content-Type", "text/plain")
+                  fmt.Fprint(w, "OK\n")
+              })
+
+              log.Println("Inventory service listening on :8083")
+              if err := http.ListenAndServe(":8083", otelhttp.NewHandler(http.DefaultServeMux, "inventory")); err != nil {
+                  log.Fatalf("Server error: %v", err)
+              }
+          }
+          EOF
+          cat > go.mod << 'EOF'
+          module kubewatch/inventory
+          go 1.21
+          require (
+              go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.49.0
+              go.opentelemetry.io/otel v1.25.0
+              go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.25.0
+              go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.25.0
+              go.opentelemetry.io/otel/sdk v1.25.0
+              go.opentelemetry.io/otel/trace v1.25.0
+          )
+          EOF
+          go mod tidy &&
+          go run main.go
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8083
+          name: http
+        env:
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: "http://otel-collector:4317"
+        - name: OTEL_EXPORTER_OTLP_PROTOCOL
+          value: "grpc"
+        - name: OTEL_TRACES_SAMPLER
+          value: "always_on"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8083
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8083
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: inventory
+  namespace: tracing
+  labels:
+    app: inventory
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8083
+    targetPort: 8083
+    protocol: TCP
+    name: http
+  selector:
+    app: inventory

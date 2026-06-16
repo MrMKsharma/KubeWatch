@@ -1,0 +1,100 @@
+# Phase 10: Performance Optimization Manifests
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: kubewatch-api-hpa
+  namespace: kubewatch
+  labels:
+    app: kubewatch
+    phase: "10"
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: kubewatch-api
+  minReplicas: 1
+  maxReplicas: 5
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: kubewatch-api-pdb
+  namespace: kubewatch
+  labels:
+    app: kubewatch
+    phase: "10"
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: kubewatch-api
+---
+# Update backend API with optimized resources
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubewatch-api
+  namespace: kubewatch
+  labels:
+    app: kubewatch-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kubewatch-api
+  template:
+    metadata:
+      labels:
+        app: kubewatch-api
+    spec:
+      containers:
+      - name: kubewatch-api
+        image: golang:1.21-alpine
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+        ports:
+        - containerPort: 8090
+---
+# Update frontend with optimized resources
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubewatch-frontend
+  namespace: kubewatch
+  labels:
+    app: kubewatch-frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kubewatch-frontend
+  template:
+    metadata:
+      labels:
+        app: kubewatch-frontend
+    spec:
+      containers:
+      - name: kubewatch-frontend
+        image: nginx:alpine
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 100m
+            memory: 128Mi
+        ports:
+        - containerPort: 3000

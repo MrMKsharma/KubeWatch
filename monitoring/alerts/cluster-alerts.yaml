@@ -1,0 +1,101 @@
+---
+# Default PrometheusRules for cluster monitoring
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: kubewatch-cluster-rules
+  namespace: monitoring
+  labels:
+    prometheus: kube-prometheus
+spec:
+  groups:
+    # Kubernetes cluster alerts
+    - name: kubernetes.rules
+      interval: 30s
+      rules:
+        # High CPU usage
+        - alert: HighNodeCPUUsage
+          expr: (100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)) > 80
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High CPU usage detected"
+            description: "Node {{ $labels.node }} CPU usage is {{ $value }}%"
+
+        # High memory usage
+        - alert: HighNodeMemoryUsage
+          expr: ((1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100) > 80
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High memory usage detected"
+            description: "Node {{ $labels.node }} memory usage is {{ $value }}%"
+
+        # Disk usage > 80%
+        - alert: HighDiskUsage
+          expr: ((node_filesystem_avail_bytes{fstype!="tmpfs"} / node_filesystem_size_bytes{fstype!="tmpfs"}) < 0.2)
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High disk usage detected"
+            description: "Disk {{ $labels.device }} on {{ $labels.node }} is {{ $value | humanizePercentage }} full"
+
+        # Node down
+        - alert: NodeDown
+          expr: up{job="kubernetes-nodes"} == 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Node is down"
+            description: "Node {{ $labels.node }} is down"
+
+        # Pod crash loop
+        - alert: PodCrashLoopBackOff
+          expr: rate(kube_pod_container_status_restarts_total[1h]) > 5
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Pod in crash loop"
+            description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} is in crash loop"
+
+    # Prometheus operational alerts
+    - name: prometheus.rules
+      interval: 30s
+      rules:
+        # Prometheus scrape errors
+        - alert: PrometheusHighErrorRate
+          expr: rate(prometheus_sd_consul_rpc_duration_seconds_count{quantile="0.5",job="prometheus"}[5m]) > 0.05
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Prometheus high error rate"
+            description: "Prometheus is experiencing high error rate"
+
+        # Prometheus config reload errors
+        - alert: PrometheusConfigReloadFailing
+          expr: prometheus_config_last_reload_successful == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Prometheus config reload failed"
+            description: "Prometheus config reload has failed"
+
+    # Alertmanager alerts
+    - name: alertmanager.rules
+      interval: 30s
+      rules:
+        - alert: AlertmanagerNotHealthy
+          expr: min by (job) (up{job="alertmanager"} == 1) == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Alertmanager is not healthy"
+            description: "Alertmanager instance {{ $labels.instance }} is not healthy"

@@ -1,0 +1,163 @@
+prometheus:
+  prometheusSpec:
+    # Resource configuration
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi
+
+    # Storage configuration
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: local-storage
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 5Gi
+
+    # Retention policy
+    retention: 15d
+    retentionSize: "4GB"
+
+    # Service monitors
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+
+    # Scrape configuration
+    scrapeInterval: 30s
+    evaluationInterval: 30s
+
+    # External labels
+    externalLabels:
+      cluster: "kubewatch"
+      environment: "local"
+
+    # Alert manager configuration
+    alertingSpec:
+      alertmanagers:
+        - namespace: monitoring
+          name: kube-prometheus-stack-alertmanager
+          port: web
+          pathPrefix: /
+
+  # Service configuration
+  service:
+    type: ClusterIP
+    port: 9090
+
+# Grafana configuration
+grafana:
+  enabled: true
+  adminPassword: "kubewatch123"
+  
+  # Service configuration
+  service:
+    type: ClusterIP
+    port: 80
+
+  # Persistence
+  persistence:
+    enabled: true
+    storageClassName: local-storage
+    size: 1Gi
+
+  # Data sources
+  datasources:
+    datasources.yaml:
+      apiVersion: 1
+      datasources:
+        - name: Prometheus
+          type: prometheus
+          url: http://kube-prometheus-stack-prometheus:9090
+          access: proxy
+          isDefault: true
+
+  # Dashboards
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+        - name: 'default'
+          orgId: 1
+          folder: ''
+          type: file
+          disableDeletion: false
+          editable: true
+          options:
+            path: /var/lib/grafana/dashboards/default
+
+# Alertmanager configuration
+alertmanager:
+  enabled: true
+  
+  alertmanagerSpec:
+    # Storage
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: local-storage
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 1Gi
+
+    # Resources
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+
+  # Service
+  service:
+    type: ClusterIP
+    port: 9093
+
+  config:
+    global:
+      resolve_timeout: 5m
+      slack_api_url: ""  # Set in secrets
+
+    route:
+      receiver: 'null'
+      group_by: ['alertname', 'cluster', 'service']
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 12h
+      routes:
+        - match:
+            alertname: Watchdog
+          receiver: 'null'
+
+    receivers:
+      - name: 'null'
+
+# Node exporter
+nodeExporter:
+  enabled: true
+
+# Kube-state-metrics
+kubeStateMetrics:
+  enabled: true
+
+# Prometheus operator
+prometheusOperator:
+  enabled: true
+  resources:
+    limits:
+      cpu: 200m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+# Kubelet service monitor
+kubelet:
+  enabled: true
+  namespace: kube-system

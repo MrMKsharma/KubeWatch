@@ -1,0 +1,47 @@
+# Phase 11: Velero Backup Setup (Simplified for Kind)
+---
+# Namespace for Velero
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: velero
+  labels:
+    name: velero
+---
+# Example Backup Schedule
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: kubewatch-daily
+  namespace: velero
+spec:
+  schedule: "0 2 * * *" # Run daily at 2 AM
+  template:
+    includedNamespaces:
+    - kubewatch
+    - monitoring
+    - logging
+    - tracing
+    - argocd
+    - gitops
+    - ingress-nginx
+    - cert-manager
+    ttl: 720h # 30 days
+---
+# Example Backup (On-demand)
+apiVersion: velero.io/v1
+kind: Backup
+metadata:
+  name: kubewatch-backup-example
+  namespace: velero
+spec:
+  includedNamespaces:
+  - kubewatch
+  - monitoring
+  - logging
+  - tracing
+  - argocd
+  - gitops
+  - ingress-nginx
+  - cert-manager
+  ttl: 720h

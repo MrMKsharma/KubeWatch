@@ -1,0 +1,67 @@
+controller:
+  # Image configuration
+  image:
+    registry: registry.k8s.io
+    image: ingress-nginx/controller
+    tag: v1.8.1
+
+  # Replica count for high availability (we can use 1 for single node Kind cluster)
+  replicaCount: 1
+
+  # Resource limits for Kind cluster
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+  # Pod disruption budget for reliability
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+  # Service type for Kind
+  service:
+    type: NodePort
+    ports:
+      http: 80
+      https: 443
+    nodePorts:
+      http: 30080
+      https: 30443
+
+  # Security context
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 101
+    fsGroup: 101
+
+  # Logging configuration
+  config:
+    log-format-upstream: '[$the_real_ip] - $remote_user [$time_local] "$request" $status $body_bytes_sent "$http_referer"'
+
+# RBAC
+rbac:
+  create: true
+
+# Service account
+serviceAccount:
+  create: true
+  name: ingress-nginx
+
+# Default backend
+defaultBackend:
+  enabled: true
+  image:
+    registry: registry.k8s.io
+    image: defaultbackend-amd64
+    tag: 1.5
+  resources:
+    limits:
+      cpu: 100m
+      memory: 128Mi
+    requests:
+      cpu: 10m
+      memory: 32Mi

@@ -1,0 +1,113 @@
+# Grafana Tempo Helm Values for KubeWatch
+# Production-grade distributed tracing platform
+
+tempo:
+  enabled: true
+  
+  # Tempo server configuration
+  server:
+    httpServer:
+      http_listen_port: 3200
+    
+  # Distributor: receives spans
+  distributor:
+    rate_limit_enabled: true
+    rate_limit: 10000
+    log_received_spans:
+      enabled: false
+  
+  # Ingester: buffers and flushes spans
+  ingester:
+    lifecycler:
+      ring:
+        replication_factor: 1
+  
+  # Metrics generator
+  metricsGenerator:
+    enabled: true
+    remoteWrite:
+      enabled: false
+  
+  # Storage
+  storage:
+    trace:
+      backend: filesystem
+      blocklist_poll_interval: 5m
+      filesystem:
+        path: /var/tempo/traces
+      wal:
+        path: /var/tempo/wal
+  
+  # Retention policy
+  retention: 168h  # 7 days
+  
+  # Resource limits for Kind cluster
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+
+# Tempo Operator/ServiceMonitor
+serviceMonitor:
+  enabled: true
+  namespace: monitoring
+  labels:
+    prometheus: kube-prometheus
+
+# Persistence for Tempo
+persistence:
+  enabled: true
+  storageClassName: local-storage
+  size: 5Gi
+  mountPath: /var/tempo
+
+# Pod configuration
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "3200"
+  prometheus.io/path: "/metrics"
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 65534
+  fsGroup: 65534
+
+# Service
+service:
+  type: ClusterIP
+  port: 3200
+  ports:
+    otlp:
+      grpc:
+        enabled: true
+        containerPort: 4317
+        port: 4317
+      http:
+        enabled: true
+        containerPort: 4318
+        port: 4318
+
+# Replicas for HA (Kind: 1, Production: 3+)
+replicas: 1
+
+# Affinity for multi-node support
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - tempo
+          topologyKey: kubernetes.io/hostname
+
+# PodDisruptionBudget
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1

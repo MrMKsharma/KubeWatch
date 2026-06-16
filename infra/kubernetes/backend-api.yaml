@@ -1,0 +1,273 @@
+# Namespace for KubeWatch backend
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kubewatch
+  labels:
+    name: kubewatch
+---
+# ServiceAccount for KubeWatch API
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kubewatch-api
+  namespace: kubewatch
+---
+# ClusterRole for KubeWatch API (read-only access to cluster resources)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubewatch-api
+rules:
+- apiGroups: [""]
+  resources: ["pods", "nodes", "services", "namespaces"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "statefulsets", "daemonsets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["monitoring.coreos.com"]
+  resources: ["prometheuses", "alertmanagers", "servicemonitors"]
+  verbs: ["get", "list", "watch"]
+---
+# ClusterRoleBinding for KubeWatch API
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kubewatch-api
+subjects:
+- kind: ServiceAccount
+  name: kubewatch-api
+  namespace: kubewatch
+roleRef:
+  kind: ClusterRole
+  name: kubewatch-api
+  apiGroup: rbac.authorization.k8s.io
+---
+# Deployment for KubeWatch API
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubewatch-api
+  namespace: kubewatch
+  labels:
+    app: kubewatch-api
+    version: "1.0.0"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kubewatch-api
+  template:
+    metadata:
+      labels:
+        app: kubewatch-api
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8090"
+    spec:
+      serviceAccountName: kubewatch-api
+      containers:
+      - name: kubewatch-api
+        image: golang:1.21-alpine
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          mkdir -p /app && cd /app &&
+          cat > main.go << 'EOF'
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"time"
+
+	"github.com/gorilla/mux"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.12.0"
+	"go.opentelemetry.io/otel/trace"
+)
+
+var tracer trace.Tracer
+
+func init() {
+	ctx := context.Background()
+
+	otelEndpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+	if otelEndpoint == "" {
+		otelEndpoint = "otel-collector.tracing.svc.cluster.local:4317"
+	}
+
+	exporter, err := otlptrace.New(ctx,
+		otlptracegrpc.NewClient(
+			otlptracegrpc.WithEndpoint(otelEndpoint),
+			otlptracegrpc.WithInsecure(),
+		),
+	)
+	if err != nil {
+		log.Printf("Failed to create exporter: %v", err)
+		return
+	}
+
+	res, err := resource.New(ctx,
+		resource.WithAttributes(
+			semconv.ServiceNameKey.String("kubewatch-api"),
+			semconv.ServiceVersionKey.String("1.0.0"),
+		),
+	)
+	if err != nil {
+		log.Printf("Failed to create resource: %v", err)
+		return
+	}
+
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithBatcher(exporter),
+		sdktrace.WithResource(res),
+	)
+	otel.SetTracerProvider(tp)
+	tracer = tp.Tracer("kubewatch-api")
+}
+
+type HealthResponse struct {
+	Status  string `json:"status"`
+	Version string `json:"version"`
+}
+
+type StatusResponse struct {
+	Status     string   `json:"status"`
+	Timestamp  string   `json:"timestamp"`
+	Services   []string `json:"services"`
+}
+
+func healthHandler(w http.ResponseWriter, r *http.Request) {
+	_, span := tracer.Start(r.Context(), "healthHandler")
+	defer span.End()
+
+	response := HealthResponse{
+		Status:  "ok",
+		Version: "1.0.0",
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(response)
+}
+
+func statusHandler(w http.ResponseWriter, r *http.Request) {
+	_, span := tracer.Start(r.Context(), "statusHandler")
+	defer span.End()
+
+	response := StatusResponse{
+		Status:    "healthy",
+		Timestamp: time.Now().Format(time.RFC3339),
+		Services: []string{
+			"prometheus",
+			"loki",
+			"tempo",
+			"kubernetes",
+		},
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(response)
+}
+
+func main() {
+	r := mux.NewRouter()
+
+	// API endpoints
+	r.HandleFunc("/api/v1/health", healthHandler).Methods("GET")
+	r.HandleFunc("/api/v1/status", statusHandler).Methods("GET")
+
+	// Wrap router with OpenTelemetry instrumentation
+	handler := otelhttp.NewHandler(r, "kubewatch-api")
+
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8090"
+	}
+
+	log.Printf("KubeWatch API listening on :%s", port)
+	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%s", port), handler))
+}
+EOF
+          cat > go.mod << 'EOF'
+module kubewatch/api
+go 1.21
+require (
+	github.com/gorilla/mux v1.8.1
+	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.49.0
+	go.opentelemetry.io/otel v1.25.0
+	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.25.0
+	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.25.0
+	go.opentelemetry.io/otel/sdk v1.25.0
+	go.opentelemetry.io/otel/trace v1.25.0
+)
+EOF
+          go mod tidy &&
+          go run main.go
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8090
+          name: http
+        env:
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: "otel-collector.tracing.svc.cluster.local:4317"
+        - name: OTEL_EXPORTER_OTLP_PROTOCOL
+          value: "grpc"
+        - name: OTEL_TRACES_SAMPLER
+          value: "always_on"
+        - name: PROMETHEUS_URL
+          value: "http://prometheus-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090"
+        - name: LOKI_URL
+          value: "http://loki.logging.svc.cluster.local:3100"
+        - name: TEMPO_URL
+          value: "http://tempo.tracing.svc.cluster.local:3200"
+        - name: PORT
+          value: "8090"
+        livenessProbe:
+          httpGet:
+            path: /api/v1/health
+            port: 8090
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /api/v1/health
+            port: 8090
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+---
+# Service for KubeWatch API
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubewatch-api
+  namespace: kubewatch
+  labels:
+    app: kubewatch-api
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8090
+    targetPort: 8090
+    protocol: TCP
+    name: http
+  selector:
+    app: kubewatch-api

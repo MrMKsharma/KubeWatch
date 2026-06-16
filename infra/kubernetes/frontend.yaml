@@ -1,0 +1,197 @@
+# Frontend Deployment and Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubewatch-frontend
+  namespace: kubewatch
+  labels:
+    app: kubewatch-frontend
+    version: "1.0.0"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kubewatch-frontend
+  template:
+    metadata:
+      labels:
+        app: kubewatch-frontend
+    spec:
+      containers:
+      - name: kubewatch-frontend
+        image: node:20-alpine
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          mkdir -p /app && cd /app &&
+          cat > index.html << 'EOF'
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>KubeWatch</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module">
+      import React from 'https://esm.sh/react@18.2.0'
+      import ReactDOM from 'https://esm.sh/react-dom@18.2.0/client'
+      
+      const { useState, useEffect } = React
+      
+      const API_BASE_URL = '/api'
+      
+      async function getHealth() {
+        const res = await fetch(`${API_BASE_URL}/v1/health`)
+        if (!res.ok) throw new Error('Failed to get health')
+        return res.json()
+      }
+      
+      async function getStatus() {
+        const res = await fetch(`${API_BASE_URL}/v1/status`)
+        if (!res.ok) throw new Error('Failed to get status')
+        return res.json()
+      }
+      
+      function App() {
+        const [health, setHealth] = useState(null)
+        const [status, setStatus] = useState(null)
+        const [loading, setLoading] = useState(true)
+        const [error, setError] = useState(null)
+      
+        useEffect(() => {
+          async function fetchData() {
+            try {
+              const [healthData, statusData] = await Promise.all([
+                getHealth(),
+                getStatus()
+              ])
+              setHealth(healthData)
+              setStatus(statusData)
+            } catch (err) {
+              setError('Failed to load data')
+            } finally {
+              setLoading(false)
+            }
+          }
+          fetchData()
+        }, [])
+      
+        return React.createElement('div', { style: { padding: '2rem', fontFamily: 'system-ui, sans-serif' } },
+          React.createElement('h1', { style: { color: '#2563eb', marginBottom: '1rem' } }, '🚀 KubeWatch'),
+          
+          loading && React.createElement('p', null, 'Loading...'),
+          error && React.createElement('p', { style: { color: '#dc2626' } }, error),
+          
+          health && React.createElement('div', { 
+            style: { 
+              border: '1px solid #e5e7eb', 
+              borderRadius: '8px', 
+              padding: '1rem', 
+              marginBottom: '1rem' 
+            } 
+          },
+            React.createElement('h2', null, 'Health Check'),
+            React.createElement('p', null, 'Status: ', React.createElement('span', { style: { color: '#16a34a', fontWeight: 'bold' } }, health.status)),
+            React.createElement('p', null, 'Version: ', health.version)
+          ),
+          
+          status && React.createElement('div', { 
+            style: { 
+              border: '1px solid #e5e7eb', 
+              borderRadius: '8px', 
+              padding: '1rem' 
+            } 
+          },
+            React.createElement('h2', null, 'System Status'),
+            React.createElement('p', null, 'Status: ', React.createElement('span', { style: { color: '#16a34a', fontWeight: 'bold' } }, status.status)),
+            React.createElement('p', null, 'Last Updated: ', status.timestamp),
+            React.createElement('h3', null, 'Services:'),
+            React.createElement('ul', null, 
+              status.services.map((service, i) => React.createElement('li', { key: i }, service))
+            )
+          )
+        )
+      }
+      
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        React.createElement(React.StrictMode, null,
+          React.createElement(App, null)
+        )
+      )
+    </script>
+  </body>
+</html>
+EOF
+          npx serve -l 3000
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 3000
+          name: http
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 3000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 3000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+---
+# Frontend Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubewatch-frontend
+  namespace: kubewatch
+  labels:
+    app: kubewatch-frontend
+spec:
+  type: ClusterIP
+  ports:
+  - port: 3000
+    targetPort: 3000
+    protocol: TCP
+    name: http
+  selector:
+    app: kubewatch-frontend
+---
+# Frontend + Backend Ingress (optional, for path-based routing)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kubewatch
+  namespace: kubewatch
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: kubewatch.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: kubewatch-frontend
+            port:
+              number: 3000
+      - path: /api(/|$)(.*)
+        pathType: Prefix
+        backend:
+          service:
+            name: kubewatch-api
+            port:
+              number: 8090

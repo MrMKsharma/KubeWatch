@@ -1,0 +1,75 @@
+---
+# Loki queries for common log patterns
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loki-queries
+  namespace: logging
+data:
+  queries.json: |
+    [
+      {
+        "name": "Error logs",
+        "query": "{namespace=\"monitoring\"} |= \"error\" or |= \"Error\" or |= \"ERROR\""
+      },
+      {
+        "name": "Warning logs",
+        "query": "{namespace=\"monitoring\"} |= \"warn\" or |= \"Warning\""
+      },
+      {
+        "name": "Pod restarts",
+        "query": "{pod=~\".+\"} |= \"Restarting\""
+      },
+      {
+        "name": "CrashLoopBackOff",
+        "query": "{pod=~\".+\"} |= \"CrashLoopBackOff\""
+      },
+      {
+        "name": "OOMKilled",
+        "query": "{pod=~\".+\"} |= \"OOMKilled\""
+      },
+      {
+        "name": "Connection refused",
+        "query": "{pod=~\".+\"} |= \"Connection refused\""
+      },
+      {
+        "name": "Timeout",
+        "query": "{pod=~\".+\"} |= \"timeout\" or |= \"Timeout\""
+      },
+      {
+        "name": "All logs by namespace",
+        "query": "{namespace=\"monitoring\"}"
+      }
+    ]
+---
+# LogQL recording rules (similar to Prometheus recording rules)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loki-rules
+  namespace: logging
+data:
+  rules.yaml: |
+    groups:
+      - name: logs
+        interval: 1m
+        rules:
+          - alert: HighErrorRate
+            expr: |
+              rate({namespace="monitoring"} |= "error" [5m]) > 0
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "High error rate detected"
+              description: "Error rate in logs exceeds threshold"
+
+          - alert: PodCrashingRepeatedly
+            expr: |
+              rate({pod=~".+"} |= "Restarting" [5m]) > 0
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Pod crashing repeatedly"
+              description: "Pod is restarting multiple times"

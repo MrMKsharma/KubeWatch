@@ -1,0 +1,21 @@
+installCRDs: true
+
+replicaCount: 1
+
+image:
+  registry: quay.io
+  repository: jetstack/cert-manager-controller
+  tag: v1.13.1
+  pullPolicy: IfNotPresent
+
+resources:
+  limits:
+    cpu: 100m
+    memory: 128Mi
+  requests:
+    cpu: 10m
+    memory: 32Mi
+
+serviceAccount:
+  create: true
+  name: cert-manager

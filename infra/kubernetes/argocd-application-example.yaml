@@ -1,0 +1,23 @@
+# Example ArgoCD Application for KubeWatch
+# Customize repoURL, targetRevision, and path to match your setup!
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kubewatch-example
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/your-username/kubewatch.git  # Update this!
+    targetRevision: HEAD  # Or use a tag like v1.0.0
+    path: infra/kubernetes  # Path to your manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kubewatch
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

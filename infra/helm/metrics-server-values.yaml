@@ -1,0 +1,30 @@
+image:
+  registry: registry.k8s.io
+  repository: metrics-server/metrics-server
+  tag: v0.6.4
+
+args:
+  - --cert-dir=/tmp
+  - --kubelet-preferred-address-types=InternalIP,ExternalIP,Hostname
+  - --kubelet-insecure-tls
+  - --kubelet-port=10250
+
+resources:
+  limits:
+    cpu: 100m
+    memory: 128Mi
+  requests:
+    cpu: 10m
+    memory: 32Mi
+
+serviceAccount:
+  create: true
+  name: metrics-server
+
+rbac:
+  create: true
+
+securityContext:
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 1000

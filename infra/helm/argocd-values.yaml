@@ -1,0 +1,41 @@
+# ArgoCD Helm Values
+# See https://github.com/argoproj/argo-helm/tree/main/charts/argo-cd
+# for complete configuration options
+
+# Server configuration
+server:
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: selfsigned
+    hosts:
+      - argocd.kubewatch.local
+    tls:
+      - secretName: argocd-tls
+        hosts:
+          - argocd.kubewatch.local
+  service:
+    type: ClusterIP
+
+# Repo server configuration
+repoServer:
+  resources:
+    limits:
+      cpu: 500m
+      memory: 256Mi
+    requests:
+      cpu: 250m
+      memory: 128Mi
+
+# Application controller configuration
+applicationSet:
+  enabled: true
+
+# Notifications controller configuration
+notifications:
+  enabled: true
+
+# Dex configuration
+dex:
+  enabled: true

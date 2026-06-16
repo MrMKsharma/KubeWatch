@@ -1,0 +1,43 @@
+## Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+crash.log
+
+## IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+## Build
+dist/
+build/
+*.o
+*.a
+*.so
+
+## Go
+vendor/
+*.exe
+*.dll
+
+## Node
+node_modules/
+npm-debug.log
+.next/
+out/
+
+## Secrets
+.env
+.env.local
+secrets/
+*.key
+kubeconfig
+
+## Misc
+.history/
+*.log

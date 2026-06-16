@@ -1,0 +1,21 @@
+# KubeWatch Main Application
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kubewatch
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/your-username/kubewatch.git
+    targetRevision: HEAD
+    path: infra/kubernetes
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kubewatch
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

@@ -1,0 +1,33 @@
+# Phase 9: Security Context Examples for KubeWatch
+---
+# Example: Deployment with secure pod/container security context
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubewatch-secure-example
+  namespace: kubewatch
+  labels:
+    app: kubewatch
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kubewatch-secure-example
+  template:
+    metadata:
+      labels:
+        app: kubewatch-secure-example
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: secure-container
+        image: nginx:alpine
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
