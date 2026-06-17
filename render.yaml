@@ -3,7 +3,7 @@ services:
   - type: web
     name: kubewatch-api
     env: go
-    plan: free
+    plan: starter  # Render's free plan is "starter" now!
     buildCommand: cd backend/api && go build -o main .
     startCommand: cd backend/api && ./main
     envVars:
@@ -16,7 +16,7 @@ services:
   - type: web
     name: kubewatch-frontend
     env: static
-    plan: free
+    # No plan needed for static sites - they're free by default!
     staticPublishPath: ./frontend/dist
     buildCommand: cd frontend && npm install && npm run build
     headers:
