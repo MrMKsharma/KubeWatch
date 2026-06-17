@@ -1,0 +1,26 @@
+# Okteto Stack for KubeWatch - 100% Free Deployment!
+version: "1.0"
+services:
+  api:
+    build:
+      context: backend/api
+    image: ${OKTETO_REGISTRY_URL}/kubewatch-api:latest
+    ports:
+      - 8090:8090
+    environment:
+      - PORT=8090
+      - ALLOWED_ORIGINS=http://localhost:3000,https://*.okteto.net
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8090/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  frontend:
+    build:
+      context: frontend
+    image: ${OKTETO_REGISTRY_URL}/kubewatch-frontend:latest
+    ports:
+      - 3000:80
+    depends_on:
+      - api

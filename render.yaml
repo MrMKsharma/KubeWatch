@@ -1,0 +1,41 @@
+# render.yaml - Auto-Deploy KubeWatch to Render (100% Free!)
+services:
+  - type: web
+    name: kubewatch-api
+    env: go
+    plan: free
+    buildCommand: cd backend/api && go build -o main .
+    startCommand: cd backend/api && ./main
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: ALLOWED_ORIGINS
+        value: "https://*.onrender.com"
+    autoDeploy: true
+
+  - type: web
+    name: kubewatch-frontend
+    env: static
+    plan: free
+    staticPublishPath: ./frontend/dist
+    buildCommand: cd frontend && npm install && npm run build
+    envVars:
+      - key: VITE_API_URL
+        fromService:
+          type: web
+          name: kubewatch-api
+          property: host
+          protocol: https
+    headers:
+      - path: /*
+        name: Cache-Control
+        value: no-cache
+    routes:
+      - type: redirect
+        source: /api/(.*)
+        destination: https://kubewatch-api.onrender.com/api/$1
+        status: 301
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    autoDeploy: true
