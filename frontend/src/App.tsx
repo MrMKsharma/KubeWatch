@@ -11,6 +11,10 @@ import {
   type NodesResponse,
   type AlertsResponse
 } from './api'
+import { demoApi } from './demo-api'
+
+// Toggle this to use demo mode (NO backend needed!)
+const USE_DEMO_MODE = true
 
 // --- Color Palette (Modern & Professional) ---
 const COLORS = {
@@ -42,12 +46,13 @@ function App() {
   // Fetch all data
   const fetchAllData = async () => {
     try {
+      const api = USE_DEMO_MODE ? demoApi : { getHealth, getStatus, getMetrics, getNodes, getAlerts }
       const [healthData, statusData, metricsData, nodesData, alertsData] = await Promise.all([
-        getHealth(),
-        getStatus(),
-        getMetrics(),
-        getNodes(),
-        getAlerts()
+        api.getHealth(),
+        api.getStatus(),
+        api.getMetrics(),
+        api.getNodes(),
+        api.getAlerts()
       ])
       setHealth(healthData)
       setStatus(statusData)
@@ -396,15 +401,6 @@ function App() {
       margin: '8px 0 0 0'
     },
 
-    twoColumnGrid: {
-      display: 'grid',
-      gridTemplateColumns: '1fr 1fr',
-      gap: '20px',
-      '@media (max-width: 900px)': {
-        gridTemplateColumns: '1fr'
-      }
-    },
-
     section: {
       background: COLORS.surface,
       borderRadius: '16px',
@@ -737,7 +733,7 @@ function App() {
             </div>
 
             {/* Nodes and Alerts */}
-            <div style={styles.twoColumnGrid}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' }}>
               {/* Nodes Section */}
               <div style={styles.section}>
                 <h2 style={styles.sectionTitle}>Cluster Nodes</h2>
