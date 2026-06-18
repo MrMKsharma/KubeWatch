@@ -84,21 +84,40 @@ KubeWatch unifies all your observability needs into a single, cohesive platform:
 - Go 1.21+
 - Docker Desktop (for Kind)
 - Kind (optional, if you want to try full cluster)
+- kubectl
+- Helm 3
 
-### 1. Run Backend API
+### One-Command Setup (Full Stack)
+```powershell
+# This creates a Kind cluster, installs Prometheus+Grafana, and starts backend/frontend
+.\start-everything.ps1
+```
+
+### Manual Quick Start
+#### 1. Run Backend API
 ```bash
 cd backend/api
 go run main.go
 ```
 API will be running at http://localhost:8090
 
-### 2. Run Frontend
+#### 2. Run Frontend
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
-Frontend will be running at http://localhost:3000
+Frontend will be running at http://localhost:3001
+
+### Stop Everything
+```powershell
+.\stop-everything.ps1
+```
+
+### Troubleshooting
+```powershell
+.\troubleshoot.ps1
+```
 
 ---
 
@@ -109,7 +128,7 @@ Frontend will be running at http://localhost:3000
 - ✅ **Cluster Overview**: Node status and pod counts
 - ✅ **Alerts Feed**: Recent alerts with severity indicators
 - ✅ **Services Status**: Health of all observability components
-- ✅ **Auto-refresh**: Data updates every 30 seconds
+- ✅ **Auto-refresh**: Data updates every 5 seconds
 - ✅ **GitOps Ready**: ArgoCD configurations provided
 - ✅ **IaC Included**: Terraform modules for cloud clusters
 - ✅ **Production Hardened**: Security policies and resource limits

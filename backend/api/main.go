@@ -44,6 +44,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 	} else {
 		// Default to localhost for development
 		originsMap["http://localhost:3000"] = true
+		originsMap["http://localhost:3001"] = true
 		originsMap["http://localhost:5173"] = true
 	}
 
@@ -73,6 +74,13 @@ var tracer trace.Tracer
 func init() {
 	ctx := context.Background()
 
+	otelEnabled := os.Getenv("OTEL_ENABLED")
+	if otelEnabled != "true" {
+		log.Println("OpenTelemetry tracing is disabled (set OTEL_ENABLED=true to enable)")
+		tracer = nil
+		return
+	}
+
 	otelEndpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
 	if otelEndpoint == "" {
 		otelEndpoint = "otel-collector.tracing.svc.cluster.local:4317"
@@ -86,6 +94,8 @@ func init() {
 	)
 	if err != nil {
 		log.Printf("Failed to create exporter: %v", err)
+		log.Println("OpenTelemetry tracing will be disabled")
+		tracer = nil
 		return
 	}
 
@@ -97,6 +107,8 @@ func init() {
 	)
 	if err != nil {
 		log.Printf("Failed to create resource: %v", err)
+		log.Println("OpenTelemetry tracing will be disabled")
+		tracer = nil
 		return
 	}
 
@@ -106,6 +118,7 @@ func init() {
 	)
 	otel.SetTracerProvider(tp)
 	tracer = tp.Tracer("kubewatch-api")
+	log.Println("OpenTelemetry tracing initialized successfully")
 }
 
 // --- Data Structures ---
@@ -161,8 +174,10 @@ type AlertsResponse struct {
 // --- Handler Functions ---
 
 func healthHandler(w http.ResponseWriter, r *http.Request) {
-	_, span := tracer.Start(r.Context(), "healthHandler")
-	defer span.End()
+	if tracer != nil {
+		_, span := tracer.Start(r.Context(), "healthHandler")
+		defer span.End()
+	}
 
 	response := HealthResponse{
 		Status:  "ok",
@@ -175,8 +190,10 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func statusHandler(w http.ResponseWriter, r *http.Request) {
-	_, span := tracer.Start(r.Context(), "statusHandler")
-	defer span.End()
+	if tracer != nil {
+		_, span := tracer.Start(r.Context(), "statusHandler")
+		defer span.End()
+	}
 
 	response := StatusResponse{
 		Status:    "healthy",
@@ -195,8 +212,10 @@ func statusHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func metricsHandler(w http.ResponseWriter, r *http.Request) {
-	_, span := tracer.Start(r.Context(), "metricsHandler")
-	defer span.End()
+	if tracer != nil {
+		_, span := tracer.Start(r.Context(), "metricsHandler")
+		defer span.End()
+	}
 
 	now := time.Now()
 	var data []MetricDataPoint
@@ -221,8 +240,10 @@ func metricsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func nodesHandler(w http.ResponseWriter, r *http.Request) {
-	_, span := tracer.Start(r.Context(), "nodesHandler")
-	defer span.End()
+	if tracer != nil {
+		_, span := tracer.Start(r.Context(), "nodesHandler")
+		defer span.End()
+	}
 
 	nodes := []NodeStats{
 		{
@@ -252,8 +273,10 @@ func nodesHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func alertsHandler(w http.ResponseWriter, r *http.Request) {
-	_, span := tracer.Start(r.Context(), "alertsHandler")
-	defer span.End()
+	if tracer != nil {
+		_, span := tracer.Start(r.Context(), "alertsHandler")
+		defer span.End()
+	}
 
 	alerts := []Alert{
 		{
@@ -299,9 +322,15 @@ func main() {
 	r.HandleFunc("/api/v1/nodes", nodesHandler).Methods("GET")
 	r.HandleFunc("/api/v1/alerts", alertsHandler).Methods("GET")
 
-	// Wrap router with OpenTelemetry instrumentation and CORS middleware
-	otelHandler := otelhttp.NewHandler(r, "kubewatch-api")
-	handler := corsMiddleware(otelHandler)
+	var handler http.Handler
+	if tracer != nil {
+		// Wrap router with OpenTelemetry instrumentation and CORS middleware
+		otelHandler := otelhttp.NewHandler(r, "kubewatch-api")
+		handler = corsMiddleware(otelHandler)
+	} else {
+		// Just use CORS middleware
+		handler = corsMiddleware(r)
+	}
 
 	port := os.Getenv("PORT")
 	if port == "" {

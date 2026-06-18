@@ -127,23 +127,13 @@
 
 ## Storage Issues
 
-### Issue: PVC pending
-**Symptoms**: PVC remains in Pending state
+### Issue: PVC pending in Kind cluster
+**Symptoms**: PVC remains in Pending state, monitoring pods stuck
+**Fix**: Create storage directories on the Kind node!
+```powershell
+docker exec kubewatch-control-plane mkdir -p /mnt/storage /mnt/storage2 /mnt/storage3 /mnt/storage4
+```
 
-**Troubleshooting**:
-1. Check PVC:
-   ```powershell
-   kubectl get pvc -n <namespace>
-   kubectl describe pvc <pvc-name> -n <namespace>
-   ```
-2. Check storage class:
-   ```powershell
-   kubectl get storageclasses
-   ```
-3. Check PV:
-   ```powershell
-   kubectl get pv
-   ```
 
 ---
 

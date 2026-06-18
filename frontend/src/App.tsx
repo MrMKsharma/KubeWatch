@@ -14,7 +14,7 @@ import {
 import { demoApi } from './demo-api'
 
 // Toggle this to use demo mode (NO backend needed!)
-const USE_DEMO_MODE = true
+const USE_DEMO_MODE = false
 
 // --- Color Palette (Modern & Professional) ---
 const COLORS = {
@@ -71,7 +71,7 @@ function App() {
     fetchAllData()
   }, [])
 
-  // Refresh data every 5 seconds for real-time demo
+  // Refresh data every 5 seconds for real-time updates
   useEffect(() => {
     const interval = setInterval(() => {
       fetchAllData()
